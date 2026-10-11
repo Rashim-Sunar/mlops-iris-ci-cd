@@ -12,6 +12,7 @@ htmlcov/
 *.log
 models/
 reports/
+artifacts/
 *.joblib
 *.pkl
 *.pickle

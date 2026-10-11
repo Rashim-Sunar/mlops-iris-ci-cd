@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
+import platform
+import subprocess
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
+import joblib
 import numpy as np
+import sklearn
 
 from .data_validation import VALID_TARGET_LABELS, load_and_validate_csv
 from .evaluate import calculate_detailed_metrics
@@ -24,6 +30,8 @@ QUALITY_GATE_CONFIG = {
     "test_size": 0.20,
     "random_state": RANDOM_STATE,
 }
+ARTIFACT_MODEL_NAME = "iris_model.joblib"
+ARTIFACT_METADATA_NAME = "model_metadata.json"
 
 
 @dataclass(frozen=True)
@@ -215,9 +223,80 @@ def write_quality_report(report: Mapping[str, object], report_path: str | Path) 
         report_file.write("\n")
 
 
+def _sha256_file(path: str | Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as data_file:
+        for chunk in iter(lambda: data_file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _source_commit_sha() -> str:
+    try:
+        return subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+
+
+def _write_model_artifacts(
+    model: object,
+    csv_path: str | Path,
+    feature_names: list[str],
+    dataframe_size: int,
+    dataset_split: DatasetSplit,
+    result: QualityGateResult,
+    artifacts_dir: str | Path,
+) -> None:
+    output_dir = Path(artifacts_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    model_path = output_dir / ARTIFACT_MODEL_NAME
+    metadata_path = output_dir / ARTIFACT_METADATA_NAME
+    joblib.dump(model, model_path)
+    metadata = {
+        "model_name": "Iris classifier",
+        "algorithm": type(model.named_steps["classifier"]).__name__,
+        "model_version": _source_commit_sha(),
+        "feature_names": feature_names,
+        "target_column": "Species",
+        "valid_target_labels": sorted(VALID_TARGET_LABELS),
+        "dataset": {
+            "filename": str(csv_path),
+            "sha256": _sha256_file(csv_path),
+            "sample_count": dataframe_size,
+        },
+        "split": {
+            "training_samples": len(dataset_split.X_train),
+            "test_samples": len(dataset_split.X_test),
+            "test_size": QUALITY_GATE_CONFIG["test_size"],
+            "random_state": QUALITY_GATE_CONFIG["random_state"],
+            "stratified": True,
+        },
+        "metrics": result.metrics,
+        "thresholds": {
+            "accuracy": QUALITY_GATE_CONFIG["accuracy_threshold"],
+            "macro_f1": QUALITY_GATE_CONFIG["macro_f1_threshold"],
+        },
+        "overall_result": "PASS",
+        "python_version": platform.python_version(),
+        "scikit_learn_version": sklearn.__version__,
+        "joblib_version": joblib.__version__,
+        "source_commit_sha": _source_commit_sha(),
+        "build_timestamp_utc": datetime.now(UTC).isoformat(),
+    }
+    with metadata_path.open("w", encoding="utf-8") as metadata_file:
+        json.dump(_json_safe(metadata), metadata_file, indent=2, allow_nan=False)
+        metadata_file.write("\n")
+
+
 def run_quality_gate(
     csv_path: str | Path = "data/raw/Iris.csv",
     report_path: str | Path = "reports/quality_report.json",
+    artifacts_dir: str | Path = "artifacts",
 ) -> QualityGateResult:
     """Validate, train, evaluate, write the report, and return the result."""
     dataframe = load_and_validate_csv(csv_path)
@@ -240,6 +319,16 @@ def run_quality_gate(
         result,
     )
     write_quality_report(report, report_path)
+    if result.passed:
+        _write_model_artifacts(
+            model,
+            csv_path,
+            list(dataset_split.X_train.columns),
+            len(dataframe),
+            dataset_split,
+            result,
+            artifacts_dir,
+        )
     return result
 
 
@@ -247,9 +336,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the Iris ML quality gate.")
     parser.add_argument("csv_path", nargs="?", default="data/raw/Iris.csv")
     parser.add_argument("--report", default="reports/quality_report.json")
+    parser.add_argument("--artifacts-dir", default="artifacts")
     args = parser.parse_args(argv)
     try:
-        result = run_quality_gate(args.csv_path, args.report)
+        result = run_quality_gate(args.csv_path, args.report, args.artifacts_dir)
     except (OSError, TypeError, ValueError) as error:
         print(f"ML quality gate: FAIL ({error})", file=sys.stderr)
         return 1
