@@ -1,5 +1,6 @@
 import json
 
+import joblib
 import pytest
 from src.data_validation import VALID_TARGET_LABELS
 from src.preprocessing import split_dataset
@@ -9,6 +10,7 @@ from src.quality_gate import (
     build_quality_report,
     evaluate_predictions,
     main,
+    run_quality_gate,
     write_quality_report,
 )
 from src.train import train_from_split
@@ -143,3 +145,22 @@ def test_quality_gate_entry_point_uses_real_dataset(tmp_path):
     report_path = tmp_path / "quality_report.json"
     assert main(["data/raw/Iris.csv", "--report", str(report_path)]) == 0
     assert report_path.is_file()
+
+
+def test_passing_quality_gate_packages_evaluated_pipeline(tmp_path):
+    result = run_quality_gate(
+        "data/raw/Iris.csv",
+        tmp_path / "quality_report.json",
+        tmp_path / "artifacts",
+    )
+    assert result.passed
+    model = joblib.load(tmp_path / "artifacts" / "iris_model.joblib")
+    metadata = json.loads((tmp_path / "artifacts" / "model_metadata.json").read_text())
+    assert model.predict([[5.1, 3.5, 1.4, 0.2]])[0] in VALID_TARGET_LABELS
+    assert metadata["overall_result"] == "PASS"
+    assert metadata["feature_names"] == [
+        "SepalLengthCm",
+        "SepalWidthCm",
+        "PetalLengthCm",
+        "PetalWidthCm",
+    ]
