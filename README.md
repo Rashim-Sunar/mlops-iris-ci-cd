@@ -5,6 +5,7 @@ Integration for the Kaggle Iris Species dataset. It validates data, prepares
 features, trains a reproducible scikit-learn classifier, evaluates it, and
 runs quality gates with pytest and Ruff. The scope ends at CI: there is no
 model serving, deployment, Docker, Kubernetes, cloud infrastructure, or CD.
+This repository is intentionally kept small for classroom CI practice.
 
 ## Dataset
 
