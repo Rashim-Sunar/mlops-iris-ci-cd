@@ -32,7 +32,7 @@ jobs:
         run: ruff format --check .
 
   tests:
-    name: ML tests
+    name: Automated tests
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -47,3 +47,28 @@ jobs:
         run: python -m pip install -r requirements-dev.txt
       - name: Run automated tests
         run: pytest -v --tb=short
+
+  ml-quality-gate:
+    name: ML quality gate
+    needs: [quality, tests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Install development dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Run ML quality gate
+        run: python -m src.quality_gate data/raw/Iris.csv --report reports/quality_report.json
+      - name: Upload ML quality report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ml-quality-report-${{ github.run_id }}
+          path: reports/quality_report.json
+          if-no-files-found: ignore

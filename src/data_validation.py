@@ -84,6 +84,12 @@ def validate_dataframe(
         )
     if dataframe[target_column].nunique() < 2:
         raise DataValidationError("The target must contain at least two classes.")
+    class_counts = dataframe[target_column].value_counts()
+    if class_counts.min() < 2:
+        raise DataValidationError(
+            "Each target class must contain at least two records for a "
+            "stratified split."
+        )
 
     duplicate_count = int(dataframe.duplicated().sum())
     if duplicate_count:
@@ -102,6 +108,11 @@ def load_and_validate_csv(path: str | Path) -> pd.DataFrame:
         raise DataValidationError(f"CSV file does not exist: {csv_path}")
     try:
         dataframe = pd.read_csv(csv_path)
-    except (OSError, pd.errors.ParserError) as error:
+    except (
+        OSError,
+        UnicodeDecodeError,
+        pd.errors.EmptyDataError,
+        pd.errors.ParserError,
+    ) as error:
         raise DataValidationError(f"Could not load CSV file: {csv_path}") from error
     return validate_dataframe(dataframe)
