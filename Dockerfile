@@ -18,4 +18,4 @@ RUN test -s artifacts/iris_model.joblib \
 
 USER appuser
 EXPOSE 8000
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "src.api:app"]
+CMD ["sh", "-c", "exec gunicorn --bind 0.0.0.0:${PORT:-8000} src.api:app"]
