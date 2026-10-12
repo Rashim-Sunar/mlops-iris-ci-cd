@@ -52,7 +52,13 @@ def create_app(
     def health():
         if app.config["MODEL"] is None:
             return _error("Model is not ready.", 503)
-        return jsonify({"status": "healthy hurray!!!!"})
+        return jsonify({"status": "healthy"})
+
+    @app.get("/hello")
+    def hello():
+        if app.config["MODEL"] is None:
+            return _error("Model is not ready.", 503)
+        return jsonify({"status": "Hello world!"})
 
     @app.get("/model-info")
     def model_info():
