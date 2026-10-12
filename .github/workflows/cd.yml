@@ -1,0 +1,53 @@
+name: Continuous Delivery to Render
+
+on:
+  workflow_run:
+    workflows: ["ML Continuous Integration"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      confirm_delivery:
+        description: "Deliver the latest successful main commit to Render"
+        required: true
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: render-production
+  cancel-in-progress: false
+
+jobs:
+  ready-for-delivery:
+    name: Mark release ready
+    if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Record delivery candidate
+        run: |
+          {
+            echo "## Delivery candidate ready"
+            echo
+            echo "Commit: ${{ github.event.workflow_run.head_sha }}"
+            echo "CI run: ${{ github.event.workflow_run.html_url }}"
+            echo
+            echo "Run this workflow manually when you approve delivery to Render."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deliver-to-render:
+    name: Deliver approved release to Render
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.confirm_delivery == true }}
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Trigger approved Render delivery
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          test -n "$RENDER_DEPLOY_HOOK_URL"
+          curl --fail --silent --show-error \
+            --request POST \
+            --max-time 30 \
+            "$RENDER_DEPLOY_HOOK_URL"
